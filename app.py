@@ -140,6 +140,39 @@ class LMSRequestHandler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         path = url.path.rstrip('/')
 
+        # Handle root / and SPA serving
+        if path == '' or not path.startswith('/api/'):
+            dist_dir = os.path.join(os.path.dirname(__file__), 'dist')
+            target = os.path.join(dist_dir, path.lstrip('/'))
+            if os.path.isfile(target):
+                self.send_response(200)
+                if target.endswith('.js'):
+                    self.send_header('Content-Type', 'application/javascript')
+                elif target.endswith('.css'):
+                    self.send_header('Content-Type', 'text/css')
+                elif target.endswith('.svg'):
+                    self.send_header('Content-Type', 'image/svg+xml')
+                elif target.endswith('.html'):
+                    self.send_header('Content-Type', 'text/html')
+                self.end_headers()
+                with open(target, 'rb') as f:
+                    self.wfile.write(f.read())
+                return
+            index_path = os.path.join(dist_dir, 'index.html')
+            if os.path.isfile(index_path):
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html')
+                self.end_headers()
+                with open(index_path, 'rb') as f:
+                    self.wfile.write(f.read())
+                return
+            # Fallback if dist not generated
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html')
+            self.end_headers()
+            self.wfile.write(b"<h1>Academia LMS - Python Backend Active</h1><p>Run <code>npm run build</code> to serve the full React web application on this port.</p>")
+            return
+
         if path == '/api/health':
             self._send_json({"status": "ok", "backend": "Python 3 Standard Library", "port": PORT})
             return

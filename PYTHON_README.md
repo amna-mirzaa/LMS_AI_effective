@@ -7,9 +7,21 @@ This project includes complete Python backends (both **Flask** with SQLAlchemy/M
 ## 1. Quick Installation (One-Line Package Install)
 To install all required Python packages and frameworks in your local Python environment:
 
-```bash
-pip install -r requirements.txt
+**On Windows (PowerShell or CMD):**
+```powershell
+python -m pip install -r requirements.txt
 ```
+
+**Or on Linux / macOS:**
+```bash
+pip3 install -r requirements.txt
+```
+
+> **Smart Launcher Available:** You can simply run:
+> ```powershell
+> python run_backend.py
+> ```
+> This will automatically detect any missing libraries, install them via pip, and launch the server.
 
 ---
 
@@ -35,14 +47,22 @@ GEMINI_API_KEY=your_gemini_api_key_here
 You can choose whichever Python framework suits your preference:
 
 ### Option A: Flask Backend (`server_flask.py`)
-Run the Flask API server:
+**On Windows:**
+```powershell
+python server_flask.py
+```
+*(or double-click `start_backend.bat`)*
+
+**On Linux / macOS:**
 ```bash
 python3 server_flask.py
 ```
-Or with Flask CLI:
-```bash
-export FLASK_APP=server_flask.py
-flask run --port=5000
+
+### Option B: Smart Auto-Setup Launcher (`run_backend.py`)
+Checks dependencies, auto-installs if anything is missing, and starts Flask:
+```powershell
+python run_backend.py
+```
 ```
 
 ### Option B: FastAPI Backend (`app.py`)
