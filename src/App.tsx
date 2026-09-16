@@ -12,6 +12,7 @@ import { SchemaErdView } from './components/SchemaErdView';
 import { AiCopilotView } from './components/AiCopilotView';
 import { StudentPortalView } from './components/StudentPortalView';
 import { LoginModal } from './components/LoginModal';
+import { PasswordChangeModal } from './components/PasswordChangeModal';
 import {
   ActiveTab,
   UserRole,
@@ -43,6 +44,7 @@ export default function App() {
     email: 'admin@institute.edu',
   });
   const [isLoginOpen, setIsLoginOpen] = useState<boolean>(false);
+  const [isPasswordChangeOpen, setIsPasswordChangeOpen] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
 
   // Master Relational Data State
@@ -169,6 +171,7 @@ export default function App() {
         setActiveTab={setActiveTab}
         currentUser={currentUser}
         onOpenLogin={() => setIsLoginOpen(true)}
+        onOpenChangePassword={() => setIsPasswordChangeOpen(true)}
         onResetDb={handleResetDb}
         onDownloadSql={handleDownloadSql}
         isResetting={isResetting}
@@ -204,6 +207,7 @@ export default function App() {
           <InstructorsView
             instructors={instructors}
             onRefresh={loadAllData}
+            currentUser={currentUser}
           />
         )}
 
@@ -212,6 +216,7 @@ export default function App() {
             courses={courses}
             instructors={instructors}
             onRefresh={loadAllData}
+            currentUser={currentUser}
             onSelectAiCurriculum={handleSelectAiCurriculum}
           />
         )}
@@ -301,6 +306,13 @@ export default function App() {
         isOpen={isLoginOpen}
         onClose={() => setIsLoginOpen(false)}
         onLoginSuccess={handleLoginSuccess}
+        currentUser={currentUser}
+      />
+
+      {/* Self-Service Password Change Modal */}
+      <PasswordChangeModal
+        isOpen={isPasswordChangeOpen}
+        onClose={() => setIsPasswordChangeOpen(false)}
         currentUser={currentUser}
       />
     </div>

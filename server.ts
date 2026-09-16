@@ -154,6 +154,39 @@ app.post("/api/auth/register-student", async (req: Request, res: Response) => {
   }
 });
 
+// User Self Password Change (for Student, Instructor, Admin)
+app.post("/api/auth/change-password", async (req: Request, res: Response) => {
+  try {
+    const db = await getDb();
+    const { userId, currentPassword, newPassword } = req.body;
+
+    if (!userId || !currentPassword || !newPassword) {
+      return res.status(400).json({ error: "User ID, current password, and new password are required." });
+    }
+
+    if (newPassword.trim().length < 6) {
+      return res.status(400).json({ error: "New password must be at least 6 characters." });
+    }
+
+    const userRes = executeQuery(db, `SELECT * FROM users WHERE id = ?;`, [userId]);
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ error: "User account not found." });
+    }
+
+    const user = userRes.rows[0];
+    if (user.password !== currentPassword.trim()) {
+      return res.status(401).json({ error: "Current password does not match our records." });
+    }
+
+    db.run(`UPDATE users SET password = ? WHERE id = ?;`, [newPassword.trim(), userId]);
+    persistDb();
+
+    res.json({ success: true, message: "Password updated successfully." });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Student Portal Data & Self-Service
 app.get("/api/student/portal/:studentId", async (req: Request, res: Response) => {
   try {
@@ -703,24 +736,41 @@ app.get("/api/instructors", async (req: Request, res: Response) => {
 app.post("/api/instructors", async (req: Request, res: Response) => {
   try {
     const db = await getDb();
+    const userRole = (req.headers['x-user-role'] as string) || 'admin';
+    if (userRole === 'student') {
+      return res.status(403).json({ error: "Access Denied: Students are not permitted to add faculty instructors." });
+    }
+
     const { name, email, specialization, status = 'Active' } = req.body;
 
     if (!name || !email || !specialization) {
       return res.status(400).json({ error: "Name, Email, and Specialization are required." });
     }
 
-    const existing = executeQuery(db, `SELECT id FROM instructors WHERE email = ?;`, [email.trim().toLowerCase()]);
+    const cleanEmail = email.trim().toLowerCase();
+    const existing = executeQuery(db, `SELECT id FROM instructors WHERE email = ?;`, [cleanEmail]);
     if (existing.rows.length > 0) {
       return res.status(409).json({ error: `An instructor with email '${email}' already exists.` });
     }
 
     db.run(
       `INSERT INTO instructors (name, email, specialization, status) VALUES (?, ?, ?, ?);`,
-      [name.trim(), email.trim().toLowerCase(), specialization.trim(), status]
+      [name.trim(), cleanEmail, specialization.trim(), status]
     );
+
+    const newInst = executeQuery(db, `SELECT * FROM instructors WHERE email = ?;`, [cleanEmail]).rows[0];
+
+    // Create user login account for the faculty member
+    const username = cleanEmail.split('@')[0];
+    const userExists = executeQuery(db, `SELECT id FROM users WHERE LOWER(username) = ?;`, [username]);
+    if (userExists.rows.length === 0) {
+      db.run(
+        `INSERT INTO users (username, password, role, ref_id, name, email) VALUES (?, 'instructor123', 'instructor', ?, ?, ?);`,
+        [username, newInst.id, name.trim(), cleanEmail]
+      );
+    }
     persistDb();
 
-    const newInst = executeQuery(db, `SELECT * FROM instructors WHERE email = ?;`, [email.trim().toLowerCase()]).rows[0];
     res.status(201).json(newInst);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -730,17 +780,29 @@ app.post("/api/instructors", async (req: Request, res: Response) => {
 app.put("/api/instructors/:id", async (req: Request, res: Response) => {
   try {
     const db = await getDb();
+    const userRole = (req.headers['x-user-role'] as string) || 'admin';
+    if (userRole === 'student') {
+      return res.status(403).json({ error: "Access Denied: Students are not permitted to edit faculty instructors." });
+    }
+
     const id = Number(req.params.id);
     const { name, email, specialization, status } = req.body;
 
-    const emailCheck = executeQuery(db, `SELECT id FROM instructors WHERE email = ? AND id != ?;`, [email.trim().toLowerCase(), id]);
+    const cleanEmail = email.trim().toLowerCase();
+    const emailCheck = executeQuery(db, `SELECT id FROM instructors WHERE email = ? AND id != ?;`, [cleanEmail, id]);
     if (emailCheck.rows.length > 0) {
       return res.status(409).json({ error: `Email '${email}' is already registered to another instructor.` });
     }
 
     db.run(
       `UPDATE instructors SET name = ?, email = ?, specialization = ?, status = ? WHERE id = ?;`,
-      [name.trim(), email.trim().toLowerCase(), specialization.trim(), status, id]
+      [name.trim(), cleanEmail, specialization.trim(), status, id]
+    );
+
+    // Sync corresponding user record
+    db.run(
+      `UPDATE users SET name = ?, email = ? WHERE ref_id = ? AND role = 'instructor';`,
+      [name.trim(), cleanEmail, id]
     );
     persistDb();
 
@@ -754,6 +816,11 @@ app.put("/api/instructors/:id", async (req: Request, res: Response) => {
 app.delete("/api/instructors/:id", async (req: Request, res: Response) => {
   try {
     const db = await getDb();
+    const userRole = (req.headers['x-user-role'] as string) || 'admin';
+    if (userRole !== 'admin') {
+      return res.status(403).json({ error: "Access Denied: Only Administrators can delete faculty instructors." });
+    }
+
     const id = Number(req.params.id);
 
     // Check if instructor has active courses (Foreign Key RESTRICT compliance)
@@ -765,6 +832,7 @@ app.delete("/api/instructors/:id", async (req: Request, res: Response) => {
     }
 
     db.run(`DELETE FROM instructors WHERE id = ?;`, [id]);
+    db.run(`DELETE FROM users WHERE ref_id = ? AND role = 'instructor';`, [id]);
     persistDb();
     res.json({ success: true });
   } catch (err: any) {
@@ -807,6 +875,11 @@ app.get("/api/courses", async (req: Request, res: Response) => {
 app.post("/api/courses", async (req: Request, res: Response) => {
   try {
     const db = await getDb();
+    const userRole = (req.headers['x-user-role'] as string) || 'admin';
+    if (userRole === 'student') {
+      return res.status(403).json({ error: "Access Denied: Students are not permitted to create courses." });
+    }
+
     const { course_name, description = "", instructor_id, duration_weeks, fee, status = 'Active' } = req.body;
 
     if (!course_name || !instructor_id || !duration_weeks || fee === undefined) {
@@ -834,6 +907,11 @@ app.post("/api/courses", async (req: Request, res: Response) => {
 app.put("/api/courses/:id", async (req: Request, res: Response) => {
   try {
     const db = await getDb();
+    const userRole = (req.headers['x-user-role'] as string) || 'admin';
+    if (userRole === 'student') {
+      return res.status(403).json({ error: "Access Denied: Students are not permitted to edit courses." });
+    }
+
     const id = Number(req.params.id);
     const { course_name, description, instructor_id, duration_weeks, fee, status } = req.body;
 
@@ -852,6 +930,11 @@ app.put("/api/courses/:id", async (req: Request, res: Response) => {
 app.delete("/api/courses/:id", async (req: Request, res: Response) => {
   try {
     const db = await getDb();
+    const userRole = (req.headers['x-user-role'] as string) || 'admin';
+    if (userRole !== 'admin') {
+      return res.status(403).json({ error: "Access Denied: Only Administrators can delete courses." });
+    }
+
     const id = Number(req.params.id);
 
     // Check for enrollments (Foreign Key RESTRICT compliance)

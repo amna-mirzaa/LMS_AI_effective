@@ -9,24 +9,30 @@ import {
   AlertCircle,
   X,
   BookOpen,
-  Briefcase
+  Briefcase,
+  ShieldAlert
 } from 'lucide-react';
-import { Instructor, InstructorStatus } from '../types';
+import { Instructor, InstructorStatus, AuthUser } from '../types';
 import { exportToCsv } from '../utils/exportCsv';
 
 interface InstructorsViewProps {
   instructors: Instructor[];
   onRefresh: () => void;
+  currentUser: AuthUser;
 }
 
 export const InstructorsView: React.FC<InstructorsViewProps> = ({
   instructors,
   onRefresh,
+  currentUser,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingInstructor, setEditingInstructor] = useState<Instructor | null>(null);
+
+  const isAdmin = currentUser.role === 'admin';
+  const isStudent = currentUser.role === 'student';
 
   const [formData, setFormData] = useState({
     name: '',
@@ -45,6 +51,7 @@ export const InstructorsView: React.FC<InstructorsViewProps> = ({
   );
 
   const handleOpenAdd = () => {
+    if (isStudent) return;
     setFormData({
       name: '',
       email: '',
@@ -56,6 +63,7 @@ export const InstructorsView: React.FC<InstructorsViewProps> = ({
   };
 
   const handleOpenEdit = (inst: Instructor) => {
+    if (isStudent) return;
     setEditingInstructor(inst);
     setFormData({
       name: inst.name,
@@ -69,13 +77,20 @@ export const InstructorsView: React.FC<InstructorsViewProps> = ({
 
   const handleCreateInstructor = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isStudent) {
+      setFormError("Access denied: Students cannot add faculty instructors.");
+      return;
+    }
     setSubmitting(true);
     setFormError(null);
 
     try {
       const res = await fetch('/api/instructors', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': currentUser.role,
+        },
         body: JSON.stringify(formData),
       });
 
@@ -95,6 +110,10 @@ export const InstructorsView: React.FC<InstructorsViewProps> = ({
 
   const handleUpdateInstructor = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isStudent) {
+      setFormError("Access denied: Students cannot modify faculty instructors.");
+      return;
+    }
     if (!editingInstructor) return;
     setSubmitting(true);
     setFormError(null);
@@ -102,7 +121,10 @@ export const InstructorsView: React.FC<InstructorsViewProps> = ({
     try {
       const res = await fetch(`/api/instructors/${editingInstructor.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': currentUser.role,
+        },
         body: JSON.stringify(formData),
       });
 
@@ -122,20 +144,30 @@ export const InstructorsView: React.FC<InstructorsViewProps> = ({
   };
 
   const handleDeleteInstructor = async (inst: Instructor) => {
+    if (!isAdmin) {
+      alert("Access Denied: Only Administrators can delete faculty instructors.");
+      return;
+    }
+
     const confirmDelete = window.confirm(
       `Are you sure you want to delete instructor "${inst.name}"? Foreign key integrity check will ensure no active courses are currently taught.`
     );
     if (!confirmDelete) return;
 
     try {
-      const res = await fetch(`/api/instructors/${inst.id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/instructors/${inst.id}`, {
+        method: 'DELETE',
+        headers: {
+          'x-user-role': currentUser.role,
+        },
+      });
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || 'Failed to delete instructor');
       }
       onRefresh();
     } catch (err: any) {
-      alert(`Error saving instructor: ${err.message}`);
+      alert(`Error deleting instructor: ${err.message}`);
     }
   };
 
@@ -149,13 +181,17 @@ export const InstructorsView: React.FC<InstructorsViewProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-5 rounded-xl border border-slate-200 shadow-2xs">
         <div>
           <div className="flex items-center space-x-2">
-            <h1 className="text-lg font-bold text-slate-900">Faculty & Instructors</h1>
+            <h1 className="text-lg font-bold text-slate-900">
+              {isStudent ? 'Faculty Directory' : 'Faculty & Instructors'}
+            </h1>
             <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
               {instructors.length} Faculty Members
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Manage academic instructors, teaching specializations, course assignments, and departmental status
+            {isStudent
+              ? 'Browse certified department professors, teaching domains, course assignments, and contact information.'
+              : 'Manage academic instructors, teaching specializations, course assignments, and departmental status'}
           </p>
         </div>
 
@@ -167,15 +203,26 @@ export const InstructorsView: React.FC<InstructorsViewProps> = ({
             <Download className="w-3.5 h-3.5" />
             <span>Export CSV</span>
           </button>
-          <button
-            onClick={handleOpenAdd}
-            className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white transition-colors shadow-2xs cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Add Instructor</span>
-          </button>
+          {!isStudent && (
+            <button
+              onClick={handleOpenAdd}
+              className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white transition-colors shadow-2xs cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Instructor</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {isStudent && (
+        <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl text-xs text-indigo-900 flex items-center space-x-2">
+          <GraduationCap className="w-4 h-4 text-indigo-600 shrink-0" />
+          <span>
+            <strong>Student View Mode:</strong> You are browsing the certified faculty directory. Faculty profiles, contact emails, and assigned curricula are managed by University Administration.
+          </span>
+        </div>
+      )}
 
       {/* Search */}
       <div className="relative">
@@ -200,13 +247,13 @@ export const InstructorsView: React.FC<InstructorsViewProps> = ({
                 <th className="py-3 px-4">Specialization</th>
                 <th className="py-3 px-4">Assigned Courses</th>
                 <th className="py-3 px-4">Status</th>
-                <th className="py-3 px-4 text-right">Actions</th>
+                {!isStudent && <th className="py-3 px-4 text-right">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-800">
               {filteredInstructors.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-slate-400">
+                  <td colSpan={isStudent ? 5 : 6} className="py-8 text-center text-slate-400">
                     No instructors found matching criteria.
                   </td>
                 </tr>
@@ -241,22 +288,26 @@ export const InstructorsView: React.FC<InstructorsViewProps> = ({
                         {i.status}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
-                      <button
-                        onClick={() => handleOpenEdit(i)}
-                        title="Edit Instructor"
-                        className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteInstructor(i)}
-                        title="Delete Instructor"
-                        className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
+                    {!isStudent && (
+                      <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
+                        <button
+                          onClick={() => handleOpenEdit(i)}
+                          title="Edit Instructor"
+                          className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        {isAdmin && (
+                          <button
+                            onClick={() => handleDeleteInstructor(i)}
+                            title="Delete Instructor"
+                            className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))
               )}

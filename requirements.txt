@@ -1,0 +1,24 @@
+# Academia LMS - Python Backend Requirements
+# Install via: pip install -r requirements.txt
+
+# Web Framework & Server (FastAPI or Flask)
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# Database & ORM (MySQL + SQLite support)
+sqlalchemy>=2.0.28
+pymysql>=1.1.0
+cryptography>=42.0.5
+
+# Data validation & Settings
+pydantic>=2.6.0
+python-dotenv>=1.0.1
+
+# Security & Authentication
+passlib[bcrypt]>=1.7.4
+python-jose[cryptography]>=3.3.0
+
+# AI / Google Gemini SDK (optional copilot features)
+google-genai>=0.1.1

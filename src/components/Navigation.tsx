@@ -16,7 +16,8 @@ import {
   ShieldCheck,
   UserCog,
   LogIn,
-  User
+  User,
+  KeyRound
 } from 'lucide-react';
 import { ActiveTab, UserRole, AuthUser } from '../types';
 
@@ -25,6 +26,7 @@ interface NavigationProps {
   setActiveTab: (tab: ActiveTab) => void;
   currentUser: AuthUser;
   onOpenLogin: () => void;
+  onOpenChangePassword: () => void;
   onResetDb: () => void;
   onDownloadSql: () => void;
   isResetting: boolean;
@@ -35,6 +37,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   setActiveTab,
   currentUser,
   onOpenLogin,
+  onOpenChangePassword,
   onResetDb,
   onDownloadSql,
   isResetting,
@@ -129,6 +132,17 @@ export const Navigation: React.FC<NavigationProps> = ({
                 </div>
               </div>
               <LogIn className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 transition-colors ml-1" />
+            </button>
+
+            {/* Change Password Button */}
+            <button
+              id="btn-change-password"
+              onClick={onOpenChangePassword}
+              title="Change your account password"
+              className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 hover:border-slate-400 transition-colors shadow-2xs cursor-pointer"
+            >
+              <KeyRound className="w-3.5 h-3.5 text-amber-600" />
+              <span className="hidden md:inline">Password</span>
             </button>
 
             {/* Download SQL script */}

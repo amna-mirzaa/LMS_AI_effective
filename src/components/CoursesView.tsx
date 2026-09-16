@@ -14,13 +14,14 @@ import {
   User,
   Users
 } from 'lucide-react';
-import { Course, Instructor, CourseStatus } from '../types';
+import { Course, Instructor, CourseStatus, AuthUser } from '../types';
 import { exportToCsv } from '../utils/exportCsv';
 
 interface CoursesViewProps {
   courses: Course[];
   instructors: Instructor[];
   onRefresh: () => void;
+  currentUser: AuthUser;
   onSelectAiCurriculum?: (courseId: number) => void;
 }
 
@@ -28,6 +29,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   courses,
   instructors,
   onRefresh,
+  currentUser,
   onSelectAiCurriculum,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -56,7 +58,11 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
     return matchesSearch && matchesStatus;
   });
 
+  const isAdmin = currentUser.role === 'admin';
+  const isStudent = currentUser.role === 'student';
+
   const handleOpenAdd = () => {
+    if (isStudent) return;
     setFormData({
       course_name: '',
       description: '',
@@ -70,6 +76,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   };
 
   const handleOpenEdit = (course: Course) => {
+    if (isStudent) return;
     setEditingCourse(course);
     setFormData({
       course_name: course.course_name,
@@ -85,13 +92,20 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
 
   const handleCreateCourse = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isStudent) {
+      setFormError("Access denied: Students cannot create courses.");
+      return;
+    }
     setSubmitting(true);
     setFormError(null);
 
     try {
       const res = await fetch('/api/courses', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': currentUser.role,
+        },
         body: JSON.stringify(formData),
       });
 
@@ -111,6 +125,10 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
 
   const handleUpdateCourse = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isStudent) {
+      setFormError("Access denied: Students cannot edit courses.");
+      return;
+    }
     if (!editingCourse) return;
     setSubmitting(true);
     setFormError(null);
@@ -118,7 +136,10 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
     try {
       const res = await fetch(`/api/courses/${editingCourse.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': currentUser.role,
+        },
         body: JSON.stringify(formData),
       });
 
@@ -138,13 +159,23 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   };
 
   const handleDeleteCourse = async (course: Course) => {
+    if (!isAdmin) {
+      alert("Access Denied: Only Administrators can delete courses.");
+      return;
+    }
+
     const confirmDelete = window.confirm(
       `Are you sure you want to delete course "${course.course_name}"? If students are enrolled, database RESTRICT rules will protect the data.`
     );
     if (!confirmDelete) return;
 
     try {
-      const res = await fetch(`/api/courses/${course.id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/courses/${course.id}`, {
+        method: 'DELETE',
+        headers: {
+          'x-user-role': currentUser.role,
+        },
+      });
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || 'Failed to delete course');
@@ -183,15 +214,26 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
             <Download className="w-3.5 h-3.5" />
             <span>Export CSV</span>
           </button>
-          <button
-            onClick={handleOpenAdd}
-            className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white transition-colors shadow-2xs cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Create Course</span>
-          </button>
+          {!isStudent && (
+            <button
+              onClick={handleOpenAdd}
+              className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white transition-colors shadow-2xs cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Create Course</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {isStudent && (
+        <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl text-xs text-indigo-900 flex items-center space-x-2">
+          <BookOpen className="w-4 h-4 text-indigo-600 shrink-0" />
+          <span>
+            <strong>Course Catalog View:</strong> You can review available courses, descriptions, credits, and faculty. To enroll, visit your <strong>My Student Portal</strong> tab.
+          </span>
+        </div>
+      )}
 
       {/* Search & Filter */}
       <div className="flex flex-col sm:flex-row gap-3">
@@ -285,22 +327,26 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                     <span>AI Syllabus</span>
                   </button>
                 )}
-                <div className="flex items-center space-x-1 ml-auto">
-                  <button
-                    onClick={() => handleOpenEdit(c)}
-                    title="Edit Course"
-                    className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => handleDeleteCourse(c)}
-                    title="Delete Course"
-                    className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                {!isStudent && (
+                  <div className="flex items-center space-x-1 ml-auto">
+                    <button
+                      onClick={() => handleOpenEdit(c)}
+                      title="Edit Course"
+                      className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                    {isAdmin && (
+                      <button
+                        onClick={() => handleDeleteCourse(c)}
+                        title="Delete Course"
+                        className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           ))
