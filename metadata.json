@@ -1,0 +1,6 @@
+{
+  "name": "AcademiaPro LMS — Academic Management System",
+  "description": "Comprehensive Learning Management System with student and course administration, academic grading, analytics reports, and AI student guidance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
