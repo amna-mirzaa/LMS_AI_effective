@@ -1,11 +1,13 @@
 # Academia LMS - Python Backend Requirements
 # Install via: pip install -r requirements.txt
 
-# Web Framework & Server (FastAPI or Flask)
-fastapi>=0.110.0
-uvicorn[standard]>=0.29.0
+# Web Frameworks & UI (Streamlit, Flask, FastAPI)
+streamlit>=1.32.0
+pandas>=2.0.0
 flask>=3.0.0
 flask-cors>=4.0.0
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
 
 # Database & ORM (MySQL + SQLite support)
 sqlalchemy>=2.0.28

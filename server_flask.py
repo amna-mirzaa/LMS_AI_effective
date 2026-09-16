@@ -107,13 +107,140 @@ def login():
             return jsonify({"error": "Invalid username or password."}), 401
 
         return jsonify({
-            "id": result["id"],
-            "username": result["username"],
-            "role": result["role"],
-            "ref_id": result["ref_id"],
-            "name": result["name"],
-            "email": result["email"]
+            "success": True,
+            "user": {
+                "id": result["id"],
+                "username": result["username"],
+                "role": result["role"],
+                "ref_id": result["ref_id"],
+                "name": result["name"],
+                "email": result["email"]
+            }
         })
+
+@app.route("/api/stats", methods=["GET"])
+def get_stats():
+    try:
+        with engine.connect() as conn:
+            student_stats = conn.execute(text("""
+                SELECT 
+                  COUNT(*) as total_students,
+                  SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) as active_students,
+                  SUM(CASE WHEN status = 'Inactive' THEN 1 ELSE 0 END) as inactive_students,
+                  SUM(CASE WHEN status = 'Suspended' THEN 1 ELSE 0 END) as suspended_students
+                FROM students
+            """)).mappings().first() or {}
+
+            instructor_stats = conn.execute(text("""
+                SELECT 
+                  COUNT(*) as total_instructors,
+                  SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) as active_instructors
+                FROM instructors
+            """)).mappings().first() or {}
+
+            course_stats = conn.execute(text("""
+                SELECT 
+                  COUNT(*) as total_courses,
+                  SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) as active_courses,
+                  AVG(fee) as average_course_fee
+                FROM courses
+            """)).mappings().first() or {}
+
+            enrollment_stats = conn.execute(text("""
+                SELECT 
+                  COUNT(*) as total_enrollments,
+                  SUM(CASE WHEN status = 'Enrolled' THEN 1 ELSE 0 END) as enrolled_count,
+                  SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) as completed_count,
+                  SUM(CASE WHEN status = 'Dropped' THEN 1 ELSE 0 END) as dropped_count
+                FROM enrollments
+            """)).mappings().first() or {}
+
+            grade_stats = conn.execute(text("""
+                SELECT 
+                  AVG(total_mark) as average_grade,
+                  COUNT(*) as graded_enrollments,
+                  MAX(total_mark) as highest_grade,
+                  MIN(total_mark) as lowest_grade
+                FROM grades
+            """)).mappings().first() or {}
+
+            rev_row = conn.execute(text("""
+                SELECT COALESCE(SUM(c.fee), 0) as total_revenue
+                FROM enrollments e
+                JOIN courses c ON e.course_id = c.id
+                WHERE e.status IN ('Enrolled', 'Completed')
+            """)).mappings().first() or {}
+
+            return jsonify({
+                "students": {
+                    "total": student_stats.get("total_students") or 0,
+                    "active": student_stats.get("active_students") or 0,
+                    "inactive": student_stats.get("inactive_students") or 0,
+                    "suspended": student_stats.get("suspended_students") or 0
+                },
+                "instructors": {
+                    "total": instructor_stats.get("total_instructors") or 0,
+                    "active": instructor_stats.get("active_instructors") or 0
+                },
+                "courses": {
+                    "total": course_stats.get("total_courses") or 0,
+                    "active": course_stats.get("active_courses") or 0,
+                    "avgFee": round(float(course_stats.get("average_course_fee") or 0))
+                },
+                "enrollments": {
+                    "total": enrollment_stats.get("total_enrollments") or 0,
+                    "enrolled": enrollment_stats.get("enrolled_count") or 0,
+                    "completed": enrollment_stats.get("completed_count") or 0,
+                    "dropped": enrollment_stats.get("dropped_count") or 0
+                },
+                "grades": {
+                    "average": round(float(grade_stats.get("average_grade") or 0), 1),
+                    "count": grade_stats.get("graded_enrollments") or 0,
+                    "highest": float(grade_stats.get("highest_grade") or 0),
+                    "lowest": float(grade_stats.get("lowest_grade") or 0)
+                },
+                "revenue": {
+                    "total": float(rev_row.get("total_revenue") or 0)
+                }
+            })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/db/test-connection", methods=["GET", "POST"])
+def test_db_connection():
+    data = request.get_json() if request.is_json else {}
+    h = data.get("host", DB_HOST)
+    p = int(data.get("port", DB_PORT))
+    u = data.get("user", DB_USER)
+    pw = data.get("password", DB_PASSWORD)
+    dbn = data.get("database", DB_NAME)
+
+    try:
+        import pymysql
+        conn = pymysql.connect(host=h, port=p, user=u, password=pw, connect_timeout=3)
+        with conn.cursor() as cur:
+            cur.execute("SHOW DATABASES;")
+            dbs = [row[0].lower() for row in cur.fetchall()]
+            db_exists = dbn.lower() in dbs
+        conn.close()
+
+        return jsonify({
+            "valid": True,
+            "host": h,
+            "port": p,
+            "database_exists": db_exists,
+            "database": dbn,
+            "message": f"Successfully connected to MySQL at {h}:{p}! Database '{dbn}' {'found' if db_exists else 'NOT found'}."
+        })
+    except Exception as e:
+        return jsonify({
+            "valid": False,
+            "host": h,
+            "port": p,
+            "database": dbn,
+            "error": str(e),
+            "message": f"Could not connect to MySQL server at {h}:{p}: {str(e)}"
+        }), 400
 
 @app.route("/api/auth/change-password", methods=["POST"])
 def change_password():
