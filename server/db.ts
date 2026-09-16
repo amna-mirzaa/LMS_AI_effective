@@ -17,7 +17,16 @@ export async function getDb(): Promise<Database> {
       const fileBuffer = fs.readFileSync(DB_FILE_PATH);
       dbInstance = new SQL.Database(fileBuffer);
       dbInstance.run("PRAGMA foreign_keys = ON;");
-      console.log("Loaded existing relational database from disk.");
+      
+      // Auto-migrate: check if users table exists
+      const userTableCheck = dbInstance.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='users';");
+      if (!userTableCheck.length || !userTableCheck[0].values.length) {
+        console.log("Users table missing in existing database. Re-seeding fresh data...");
+        seedInitialData(dbInstance);
+        persistDb();
+      } else {
+        console.log("Loaded existing relational database from disk.");
+      }
       return dbInstance;
     } catch (err) {
       console.error("Failed to load existing DB file, creating fresh DB:", err);
@@ -49,6 +58,17 @@ export function initializeSchema(db: Database) {
   db.run("PRAGMA foreign_keys = ON;");
 
   const schema = `
+    -- 0. User Authentication & Credentials Table
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE,
+      password TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('admin', 'instructor', 'student')),
+      ref_id INTEGER,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL
+    );
+
     -- 1. Students Table
     CREATE TABLE IF NOT EXISTS students (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -122,6 +142,7 @@ export function calculateGrade(assignment: number, quiz: number, finalExam: numb
 
 export function seedInitialData(db: Database) {
   // Clear any existing tables
+  db.run("DROP TABLE IF EXISTS users;");
   db.run("DROP TABLE IF EXISTS grades;");
   db.run("DROP TABLE IF EXISTS enrollments;");
   db.run("DROP TABLE IF EXISTS courses;");
@@ -129,6 +150,12 @@ export function seedInitialData(db: Database) {
   db.run("DROP TABLE IF EXISTS students;");
 
   initializeSchema(db);
+
+  // Seed Users: Administrator
+  db.run(
+    "INSERT INTO users (username, password, role, ref_id, name, email) VALUES (?, ?, ?, ?, ?, ?);",
+    ["admin", "admin123", "admin", null, "Academic Administrator", "admin@institute.edu"]
+  );
 
   // Seed Instructors
   const instructors = [
@@ -140,11 +167,19 @@ export function seedInitialData(db: Database) {
     { name: "Prof. Julian Keller", email: "julian.keller@institute.edu", specialization: "Mobile & Embedded Systems", status: "On Leave" },
   ];
 
+  let instId = 1;
   for (const inst of instructors) {
     db.run(
       "INSERT INTO instructors (name, email, specialization, status) VALUES (?, ?, ?, ?);",
       [inst.name, inst.email, inst.specialization, inst.status]
     );
+    // Create corresponding instructor user account
+    const username = inst.email.split('@')[0];
+    db.run(
+      "INSERT INTO users (username, password, role, ref_id, name, email) VALUES (?, ?, 'instructor', ?, ?, ?);",
+      [username, "instructor123", instId, inst.name, inst.email]
+    );
+    instId++;
   }
 
   // Seed Students
@@ -161,11 +196,19 @@ export function seedInitialData(db: Database) {
     { name: "Noah Washington", email: "noah.w@student.edu", phone: "+1-555-0110", enrollment_date: "2025-02-18", status: "Suspended" },
   ];
 
+  let studId = 1;
   for (const s of students) {
     db.run(
       "INSERT INTO students (name, email, phone, enrollment_date, status) VALUES (?, ?, ?, ?, ?);",
       [s.name, s.email, s.phone, s.enrollment_date, s.status]
     );
+    // Create corresponding student user account
+    const username = s.email.split('@')[0];
+    db.run(
+      "INSERT INTO users (username, password, role, ref_id, name, email) VALUES (?, ?, 'student', ?, ?, ?);",
+      [username, "student123", studId, s.name, s.email]
+    );
+    studId++;
   }
 
   // Seed Courses (Note: Course 7 has no students enrolled to satisfy BR-06 client acceptance test!)
@@ -283,12 +326,26 @@ export function generateSqlDump(db: Database): string {
   dump += `-- ==========================================================================\n\n`;
 
   dump += `SET FOREIGN_KEY_CHECKS = 0;\n`;
+  dump += `DROP TABLE IF EXISTS users;\n`;
   dump += `DROP TABLE IF EXISTS grades;\n`;
   dump += `DROP TABLE IF EXISTS enrollments;\n`;
   dump += `DROP TABLE IF EXISTS courses;\n`;
   dump += `DROP TABLE IF EXISTS instructors;\n`;
   dump += `DROP TABLE IF EXISTS students;\n`;
   dump += `SET FOREIGN_KEY_CHECKS = 1;\n\n`;
+
+  dump += `-- --------------------------------------------------------------------------\n`;
+  dump += `-- Table structure for table \`users\`\n`;
+  dump += `-- --------------------------------------------------------------------------\n`;
+  dump += `CREATE TABLE users (\n`;
+  dump += `  id INT AUTO_INCREMENT PRIMARY KEY,\n`;
+  dump += `  username VARCHAR(100) NOT NULL UNIQUE,\n`;
+  dump += `  password VARCHAR(255) NOT NULL,\n`;
+  dump += `  role ENUM('admin', 'instructor', 'student') NOT NULL,\n`;
+  dump += `  ref_id INT NULL,\n`;
+  dump += `  name VARCHAR(150) NOT NULL,\n`;
+  dump += `  email VARCHAR(150) NOT NULL\n`;
+  dump += `) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n\n`;
 
   dump += `-- --------------------------------------------------------------------------\n`;
   dump += `-- Table structure for table \`students\`\n`;
@@ -357,7 +414,7 @@ export function generateSqlDump(db: Database): string {
   dump += `) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n\n`;
 
   // Append data dumps
-  const tables = ['instructors', 'students', 'courses', 'enrollments', 'grades'];
+  const tables = ['users', 'instructors', 'students', 'courses', 'enrollments', 'grades'];
   for (const t of tables) {
     const res = executeQuery(db, `SELECT * FROM ${t};`);
     if (res.rows.length > 0) {

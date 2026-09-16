@@ -10,9 +10,12 @@ import { ReportsView } from './components/ReportsView';
 import { SqlStudioView } from './components/SqlStudioView';
 import { SchemaErdView } from './components/SchemaErdView';
 import { AiCopilotView } from './components/AiCopilotView';
+import { StudentPortalView } from './components/StudentPortalView';
+import { LoginModal } from './components/LoginModal';
 import {
   ActiveTab,
   UserRole,
+  AuthUser,
   DashboardStats,
   Student,
   Instructor,
@@ -31,8 +34,16 @@ import {
 } from 'lucide-react';
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState<AuthUser>({
+    id: 1,
+    username: 'admin',
+    role: 'admin',
+    ref_id: null,
+    name: 'Academic Administrator',
+    email: 'admin@institute.edu',
+  });
+  const [isLoginOpen, setIsLoginOpen] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
-  const [userRole, setUserRole] = useState<UserRole>('Administrator');
 
   // Master Relational Data State
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -55,6 +66,18 @@ export default function App() {
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
+  };
+
+  const handleLoginSuccess = (user: AuthUser) => {
+    setCurrentUser(user);
+    if (user.role === 'student') {
+      setActiveTab('student_portal');
+    } else if (user.role === 'instructor') {
+      setActiveTab('courses');
+    } else {
+      setActiveTab('dashboard');
+    }
+    showToast(`Signed in as ${user.name} (${user.role.toUpperCase()})`);
   };
 
   const loadAllData = useCallback(async () => {
@@ -144,8 +167,8 @@ export default function App() {
       <Navigation
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        userRole={userRole}
-        setUserRole={setUserRole}
+        currentUser={currentUser}
+        onOpenLogin={() => setIsLoginOpen(true)}
         onResetDb={handleResetDb}
         onDownloadSql={handleDownloadSql}
         isResetting={isResetting}
@@ -153,6 +176,14 @@ export default function App() {
 
       {/* Main Tab View Canvas */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {activeTab === 'student_portal' && (
+          <StudentPortalView
+            currentUser={currentUser}
+            onRefreshAll={loadAllData}
+            showToast={showToast}
+          />
+        )}
+
         {activeTab === 'dashboard' && (
           <DashboardView
             stats={stats}
@@ -264,6 +295,14 @@ export default function App() {
           </button>
         </div>
       )}
+
+      {/* Role Switcher & Login Modal */}
+      <LoginModal
+        isOpen={isLoginOpen}
+        onClose={() => setIsLoginOpen(false)}
+        onLoginSuccess={handleLoginSuccess}
+        currentUser={currentUser}
+      />
     </div>
   );
 }

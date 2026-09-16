@@ -14,15 +14,17 @@ import {
   RotateCcw,
   Download,
   ShieldCheck,
-  UserCog
+  UserCog,
+  LogIn,
+  User
 } from 'lucide-react';
-import { ActiveTab, UserRole } from '../types';
+import { ActiveTab, UserRole, AuthUser } from '../types';
 
 interface NavigationProps {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
-  userRole: UserRole;
-  setUserRole: (role: UserRole) => void;
+  currentUser: AuthUser;
+  onOpenLogin: () => void;
   onResetDb: () => void;
   onDownloadSql: () => void;
   isResetting: boolean;
@@ -31,24 +33,45 @@ interface NavigationProps {
 export const Navigation: React.FC<NavigationProps> = ({
   activeTab,
   setActiveTab,
-  userRole,
-  setUserRole,
+  currentUser,
+  onOpenLogin,
   onResetDb,
   onDownloadSql,
   isResetting,
 }) => {
-  const navItems: { id: ActiveTab; label: string; icon: React.ReactNode; badge?: string }[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
-    { id: 'students', label: 'Students', icon: <Users className="w-4 h-4" /> },
-    { id: 'instructors', label: 'Instructors', icon: <GraduationCap className="w-4 h-4" /> },
-    { id: 'courses', label: 'Courses', icon: <BookOpen className="w-4 h-4" /> },
-    { id: 'enrollments', label: 'Enrollments', icon: <UserCheck className="w-4 h-4" /> },
-    { id: 'grades', label: 'Grades & Marks', icon: <Award className="w-4 h-4" /> },
-    { id: 'reports', label: 'Reports', icon: <FileBarChart className="w-4 h-4" /> },
-    { id: 'sql_studio', label: 'SQL Studio', icon: <Terminal className="w-4 h-4" /> },
-    { id: 'schema_erd', label: 'Schema & ERD', icon: <Network className="w-4 h-4" /> },
-    { id: 'ai_copilot', label: 'AI Assistant', icon: <Sparkles className="w-4 h-4 text-amber-500" /> },
-  ];
+  // Role-based Nav items
+  let navItems: { id: ActiveTab; label: string; icon: React.ReactNode; badge?: string }[] = [];
+
+  if (currentUser.role === 'student') {
+    navItems = [
+      { id: 'student_portal', label: 'My Student Portal', icon: <GraduationCap className="w-4 h-4 text-indigo-500" /> },
+      { id: 'courses', label: 'Course Catalog', icon: <BookOpen className="w-4 h-4" /> },
+      { id: 'instructors', label: 'Faculty Directory', icon: <Users className="w-4 h-4" /> },
+    ];
+  } else if (currentUser.role === 'instructor') {
+    navItems = [
+      { id: 'dashboard', label: 'Faculty Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
+      { id: 'courses', label: 'Courses & Syllabus', icon: <BookOpen className="w-4 h-4" /> },
+      { id: 'grades', label: 'Grading & Marks', icon: <Award className="w-4 h-4" /> },
+      { id: 'enrollments', label: 'Class Enrollments', icon: <UserCheck className="w-4 h-4" /> },
+      { id: 'ai_copilot', label: 'AI Assistant', icon: <Sparkles className="w-4 h-4 text-amber-500" /> },
+    ];
+  } else {
+    // Administrator: Full access
+    navItems = [
+      { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
+      { id: 'student_portal', label: 'Student Portal (Preview)', icon: <GraduationCap className="w-4 h-4 text-indigo-500" /> },
+      { id: 'students', label: 'Students', icon: <Users className="w-4 h-4" /> },
+      { id: 'instructors', label: 'Instructors', icon: <Users className="w-4 h-4" /> },
+      { id: 'courses', label: 'Courses', icon: <BookOpen className="w-4 h-4" /> },
+      { id: 'enrollments', label: 'Enrollments', icon: <UserCheck className="w-4 h-4" /> },
+      { id: 'grades', label: 'Grades & Marks', icon: <Award className="w-4 h-4" /> },
+      { id: 'reports', label: 'Reports', icon: <FileBarChart className="w-4 h-4" /> },
+      { id: 'sql_studio', label: 'SQL Studio', icon: <Terminal className="w-4 h-4" /> },
+      { id: 'schema_erd', label: 'Schema & ERD', icon: <Network className="w-4 h-4" /> },
+      { id: 'ai_copilot', label: 'AI Assistant', icon: <Sparkles className="w-4 h-4 text-amber-500" /> },
+    ];
+  }
 
   return (
     <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
@@ -74,29 +97,45 @@ export const Navigation: React.FC<NavigationProps> = ({
             </div>
           </div>
 
-          {/* Right Header Actions: Role Switcher, SQL Dump, DB Reset */}
+          {/* Right Header Actions: User Profile Badge, Switch Account, SQL Dump, DB Reset */}
           <div className="flex items-center space-x-2 sm:space-x-3">
-            {/* Role Switcher */}
-            <div className="flex items-center space-x-1.5 bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs">
-              <UserCog className="w-3.5 h-3.5 text-slate-500 ml-1.5 hidden sm:inline" />
-              <label htmlFor="role-select" className="text-slate-600 font-medium hidden sm:inline">Role:</label>
-              <select
-                id="role-select"
-                value={userRole}
-                onChange={(e) => setUserRole(e.target.value as UserRole)}
-                className="bg-white text-slate-800 font-semibold px-2 py-1 rounded shadow-2xs border-0 focus:ring-1 focus:ring-indigo-500 cursor-pointer text-xs"
-              >
-                <option value="Administrator">Administrator</option>
-                <option value="Academic Coordinator">Academic Coordinator</option>
-                <option value="Instructor">Instructor</option>
-              </select>
-            </div>
+            {/* Logged in User Card */}
+            <button
+              onClick={onOpenLogin}
+              title="Click to switch role or sign into another account"
+              className="flex items-center space-x-2 bg-slate-50 hover:bg-slate-100 p-1.5 pr-3 rounded-xl border border-slate-200 text-xs transition-colors cursor-pointer group"
+            >
+              <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs text-white ${
+                currentUser.role === 'admin'
+                  ? 'bg-slate-900'
+                  : currentUser.role === 'instructor'
+                  ? 'bg-indigo-600'
+                  : 'bg-emerald-600'
+              }`}>
+                {currentUser.role === 'admin' ? (
+                  <ShieldCheck className="w-4 h-4" />
+                ) : currentUser.role === 'instructor' ? (
+                  <GraduationCap className="w-4 h-4" />
+                ) : (
+                  <User className="w-4 h-4" />
+                )}
+              </div>
+              <div className="text-left hidden sm:block">
+                <div className="font-bold text-slate-900 leading-tight group-hover:text-indigo-600 transition-colors">
+                  {currentUser.name}
+                </div>
+                <div className="text-[10px] text-slate-500 capitalize">
+                  {currentUser.role === 'admin' ? 'Administrator' : currentUser.role}
+                </div>
+              </div>
+              <LogIn className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 transition-colors ml-1" />
+            </button>
 
             {/* Download SQL script */}
             <button
               id="btn-download-sql"
               onClick={onDownloadSql}
-              title="Export database SQL script"
+              title="Export database SQL script (MySQL / SQLite compatible)"
               className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 hover:border-slate-400 transition-colors shadow-2xs cursor-pointer"
             >
               <Download className="w-3.5 h-3.5 text-indigo-600" />
@@ -104,17 +143,19 @@ export const Navigation: React.FC<NavigationProps> = ({
               <span className="font-mono text-[11px] text-slate-500">.sql</span>
             </button>
 
-            {/* Reset Database with Demo Data */}
-            <button
-              id="btn-reset-db"
-              onClick={onResetDb}
-              disabled={isResetting}
-              title="Reset to default sample data"
-              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors cursor-pointer disabled:opacity-50"
-            >
-              <RotateCcw className={`w-3.5 h-3.5 ${isResetting ? 'animate-spin' : ''}`} />
-              <span className="hidden md:inline">Reset Demo Data</span>
-            </button>
+            {/* Reset Database with Demo Data (Only for Admin) */}
+            {currentUser.role === 'admin' && (
+              <button
+                id="btn-reset-db"
+                onClick={onResetDb}
+                disabled={isResetting}
+                title="Reset to default sample data"
+                className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <RotateCcw className={`w-3.5 h-3.5 ${isResetting ? 'animate-spin' : ''}`} />
+                <span className="hidden md:inline">Reset Demo Data</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -154,3 +195,4 @@ export const Navigation: React.FC<NavigationProps> = ({
     </header>
   );
 };
+

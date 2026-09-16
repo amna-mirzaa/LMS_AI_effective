@@ -2,7 +2,16 @@ export type StudentStatus = 'Active' | 'Inactive' | 'Suspended';
 export type InstructorStatus = 'Active' | 'On Leave' | 'Inactive';
 export type CourseStatus = 'Active' | 'Archived' | 'Upcoming';
 export type EnrollmentStatus = 'Enrolled' | 'Completed' | 'Dropped';
-export type UserRole = 'Administrator' | 'Academic Coordinator' | 'Instructor';
+export type UserRole = 'admin' | 'instructor' | 'student';
+
+export interface AuthUser {
+  id: number;
+  username: string;
+  role: UserRole;
+  ref_id?: number | null; // student id or instructor id
+  name: string;
+  email: string;
+}
 
 export interface Student {
   id: number;
@@ -123,6 +132,7 @@ export interface ReportData {
 
 export type ActiveTab =
   | 'dashboard'
+  | 'student_portal'
   | 'students'
   | 'instructors'
   | 'courses'

@@ -39,6 +39,204 @@ app.get("/api/health", async (req: Request, res: Response) => {
 });
 
 // ============================================================================
+// 1.1 Authentication & Role-Based Access Control
+// ============================================================================
+app.post("/api/auth/login", async (req: Request, res: Response) => {
+  try {
+    const db = await getDb();
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({ error: "Username and password are required." });
+    }
+
+    const result = executeQuery(
+      db,
+      `SELECT id, username, role, ref_id, name, email FROM users WHERE LOWER(username) = LOWER(?) AND password = ?;`,
+      [username.trim(), password.trim()]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: "Invalid credentials. Please check your username and password." });
+    }
+
+    const user = result.rows[0];
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        ref_id: user.ref_id,
+        name: user.name,
+        email: user.email
+      }
+    });
+  } catch (err: any) {
+    console.error("Login error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/auth/demo-users", async (req: Request, res: Response) => {
+  try {
+    const db = await getDb();
+    const result = executeQuery(
+      db,
+      `SELECT id, username, password, role, ref_id, name, email FROM users ORDER BY 
+        CASE role 
+          WHEN 'admin' THEN 1 
+          WHEN 'instructor' THEN 2 
+          WHEN 'student' THEN 3 
+        END, id ASC;`
+    );
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Student Portal Data & Self-Service
+app.get("/api/student/portal/:studentId", async (req: Request, res: Response) => {
+  try {
+    const db = await getDb();
+    const studentId = Number(req.params.studentId);
+
+    // Student profile
+    const studentRes = executeQuery(db, `SELECT * FROM students WHERE id = ?;`, [studentId]);
+    if (studentRes.rows.length === 0) {
+      return res.status(404).json({ error: "Student not found." });
+    }
+    const student = studentRes.rows[0];
+
+    // Current enrollments with course details and grades
+    const enrollmentsRes = executeQuery(
+      db,
+      `SELECT 
+        e.id as enrollment_id, e.student_id, e.course_id, e.enrollment_date, e.status as enrollment_status,
+        c.course_name, c.description, c.duration_weeks, c.fee,
+        i.name as instructor_name, i.email as instructor_email, i.specialization as instructor_specialization,
+        g.id as grade_id, g.assignment_mark, g.quiz_mark, g.final_exam_mark, g.total_mark, g.grade_letter, g.feedback
+       FROM enrollments e
+       JOIN courses c ON e.course_id = c.id
+       JOIN instructors i ON c.instructor_id = i.id
+       LEFT JOIN grades g ON e.id = g.enrollment_id
+       WHERE e.student_id = ?
+       ORDER BY e.id DESC;`,
+      [studentId]
+    );
+
+    // Available courses to register (active courses student is NOT currently enrolled in)
+    const availableRes = executeQuery(
+      db,
+      `SELECT 
+        c.id, c.course_name, c.description, c.duration_weeks, c.fee, c.status,
+        i.name as instructor_name, i.specialization as instructor_specialization
+       FROM courses c
+       JOIN instructors i ON c.instructor_id = i.id
+       WHERE c.status IN ('Active', 'Upcoming')
+       AND c.id NOT IN (
+         SELECT course_id FROM enrollments WHERE student_id = ? AND status IN ('Enrolled', 'Completed')
+       )
+       ORDER BY c.id ASC;`,
+      [studentId]
+    );
+
+    res.json({
+      student,
+      enrollments: enrollmentsRes.rows,
+      availableCourses: availableRes.rows
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/student/register-course", async (req: Request, res: Response) => {
+  try {
+    const db = await getDb();
+    const { student_id, course_id } = req.body;
+
+    if (!student_id || !course_id) {
+      return res.status(400).json({ error: "Student ID and Course ID are required." });
+    }
+
+    // Verify course exists
+    const courseRes = executeQuery(db, `SELECT course_name FROM courses WHERE id = ?;`, [Number(course_id)]);
+    if (courseRes.rows.length === 0) {
+      return res.status(404).json({ error: "Course not found." });
+    }
+    const courseName = courseRes.rows[0].course_name;
+
+    // Check duplicate
+    const existing = executeQuery(
+      db,
+      `SELECT id, status FROM enrollments WHERE student_id = ? AND course_id = ?;`,
+      [Number(student_id), Number(course_id)]
+    );
+
+    if (existing.rows.length > 0) {
+      const rec = existing.rows[0];
+      if (rec.status === 'Dropped') {
+        // Re-activate dropped enrollment
+        db.run(
+          `UPDATE enrollments SET status = 'Enrolled', enrollment_date = ? WHERE id = ?;`,
+          [new Date().toISOString().split('T')[0], rec.id]
+        );
+        persistDb();
+        return res.json({ success: true, message: `Successfully re-enrolled in "${courseName}".` });
+      } else {
+        return res.status(409).json({ error: `You are already enrolled in "${courseName}".` });
+      }
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    db.run(
+      `INSERT INTO enrollments (student_id, course_id, enrollment_date, status) VALUES (?, ?, ?, 'Enrolled');`,
+      [Number(student_id), Number(course_id), today]
+    );
+    persistDb();
+
+    res.status(201).json({ success: true, message: `Successfully registered in "${courseName}".` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/student/drop-course", async (req: Request, res: Response) => {
+  try {
+    const db = await getDb();
+    const { student_id, enrollment_id } = req.body;
+
+    if (!student_id || !enrollment_id) {
+      return res.status(400).json({ error: "Student ID and Enrollment ID are required." });
+    }
+
+    const check = executeQuery(
+      db,
+      `SELECT e.id, c.course_name FROM enrollments e JOIN courses c ON e.course_id = c.id WHERE e.id = ? AND e.student_id = ?;`,
+      [Number(enrollment_id), Number(student_id)]
+    );
+
+    if (check.rows.length === 0) {
+      return res.status(404).json({ error: "Enrollment record not found or does not belong to this student." });
+    }
+
+    const courseName = check.rows[0].course_name;
+
+    db.run(
+      `UPDATE enrollments SET status = 'Dropped' WHERE id = ? AND student_id = ?;`,
+      [Number(enrollment_id), Number(student_id)]
+    );
+    persistDb();
+
+    res.json({ success: true, message: `Successfully dropped course "${courseName}".` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
 // 2. Executive Dashboard KPIs & Statistics
 // ============================================================================
 app.get("/api/stats", async (req: Request, res: Response) => {
