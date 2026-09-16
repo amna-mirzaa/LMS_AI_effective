@@ -96,6 +96,64 @@ app.get("/api/auth/demo-users", async (req: Request, res: Response) => {
   }
 });
 
+// Student Self-Registration (Sign-Up)
+app.post("/api/auth/register-student", async (req: Request, res: Response) => {
+  try {
+    const db = await getDb();
+    const { name, email, phone, username, password } = req.body;
+
+    if (!name || !email || !username || !password) {
+      return res.status(400).json({ error: "Name, email, username, and password are required." });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanUsername = username.trim().toLowerCase();
+
+    // Check if email already registered in students or users
+    const existingStudent = executeQuery(db, `SELECT id FROM students WHERE email = ?;`, [cleanEmail]);
+    if (existingStudent.rows.length > 0) {
+      return res.status(409).json({ error: `A student with email '${cleanEmail}' is already registered.` });
+    }
+
+    // Check if username already exists in users
+    const existingUser = executeQuery(db, `SELECT id FROM users WHERE LOWER(username) = ?;`, [cleanUsername]);
+    if (existingUser.rows.length > 0) {
+      return res.status(409).json({ error: `Username '${cleanUsername}' is already taken. Please choose another.` });
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+
+    // 1. Insert into students
+    db.run(
+      `INSERT INTO students (name, email, phone, enrollment_date, status) VALUES (?, ?, ?, ?, 'Active');`,
+      [name.trim(), cleanEmail, phone ? phone.trim() : '', today]
+    );
+
+    // Get the newly created student record
+    const createdStudent = executeQuery(db, `SELECT * FROM students WHERE email = ?;`, [cleanEmail]).rows[0];
+    const studentId = createdStudent.id;
+
+    // 2. Insert into users with student role and ref_id
+    db.run(
+      `INSERT INTO users (username, password, role, ref_id, name, email) VALUES (?, ?, 'student', ?, ?, ?);`,
+      [cleanUsername, password.trim(), studentId, name.trim(), cleanEmail]
+    );
+    persistDb();
+
+    const createdUser = executeQuery(db, `SELECT id, username, role, ref_id, name, email FROM users WHERE LOWER(username) = ?;`, [cleanUsername]).rows[0];
+
+    res.status(201).json({
+      success: true,
+      message: `Registration successful! Welcome to AcademiaPro, ${name.trim()}.`,
+      user: createdUser,
+      student: createdStudent,
+    });
+  } catch (err: any) {
+    console.error("Student registration error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Student Portal Data & Self-Service
 app.get("/api/student/portal/:studentId", async (req: Request, res: Response) => {
   try {
@@ -426,26 +484,50 @@ app.get("/api/students/:id", async (req: Request, res: Response) => {
 app.post("/api/students", async (req: Request, res: Response) => {
   try {
     const db = await getDb();
-    const { name, email, phone, enrollment_date, status = 'Active' } = req.body;
+    const { name, email, phone, enrollment_date, status = 'Active', username, password } = req.body;
 
     if (!name || !email || !phone || !enrollment_date) {
       return res.status(400).json({ error: "All student fields are required: Name, Email, Phone, Enrollment Date." });
     }
 
+    const cleanEmail = email.trim().toLowerCase();
+
     // Check unique email
-    const existing = executeQuery(db, `SELECT id FROM students WHERE email = ?;`, [email.trim().toLowerCase()]);
+    const existing = executeQuery(db, `SELECT id FROM students WHERE email = ?;`, [cleanEmail]);
     if (existing.rows.length > 0) {
       return res.status(409).json({ error: `A student with email '${email}' already exists.` });
     }
 
     db.run(
       `INSERT INTO students (name, email, phone, enrollment_date, status) VALUES (?, ?, ?, ?, ?);`,
-      [name.trim(), email.trim().toLowerCase(), phone.trim(), enrollment_date, status]
+      [name.trim(), cleanEmail, phone.trim(), enrollment_date, status]
+    );
+
+    const newStudent = executeQuery(db, `SELECT * FROM students WHERE email = ?;`, [cleanEmail]).rows[0];
+    const studentId = newStudent.id;
+
+    // Generate or use provided username
+    let desiredUsername = (username ? username.trim().toLowerCase() : cleanEmail.split('@')[0]);
+    // Ensure uniqueness in users
+    const existingUser = executeQuery(db, `SELECT id FROM users WHERE LOWER(username) = ?;`, [desiredUsername]);
+    if (existingUser.rows.length > 0) {
+      desiredUsername = `${desiredUsername}${studentId}`;
+    }
+
+    const initialPassword = (password && password.trim()) ? password.trim() : 'student123';
+
+    // Provision user login credentials
+    db.run(
+      `INSERT INTO users (username, password, role, ref_id, name, email) VALUES (?, ?, 'student', ?, ?, ?);`,
+      [desiredUsername, initialPassword, studentId, name.trim(), cleanEmail]
     );
     persistDb();
 
-    const newStudent = executeQuery(db, `SELECT * FROM students WHERE email = ?;`, [email.trim().toLowerCase()]).rows[0];
-    res.status(201).json(newStudent);
+    res.status(201).json({
+      ...newStudent,
+      username: desiredUsername,
+      initial_password: initialPassword
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -463,9 +545,11 @@ app.put("/api/students/:id", async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Student not found" });
     }
 
+    const cleanEmail = email.trim().toLowerCase();
+
     // Check duplicate email
     if (email) {
-      const emailConflict = executeQuery(db, `SELECT id FROM students WHERE email = ? AND id != ?;`, [email.trim().toLowerCase(), id]);
+      const emailConflict = executeQuery(db, `SELECT id FROM students WHERE email = ? AND id != ?;`, [cleanEmail, id]);
       if (emailConflict.rows.length > 0) {
         return res.status(409).json({ error: `Email '${email}' is already registered to another student.` });
       }
@@ -473,12 +557,93 @@ app.put("/api/students/:id", async (req: Request, res: Response) => {
 
     db.run(
       `UPDATE students SET name = ?, email = ?, phone = ?, enrollment_date = ?, status = ? WHERE id = ?;`,
-      [name, email.toLowerCase(), phone, enrollment_date, status, id]
+      [name.trim(), cleanEmail, phone, enrollment_date, status, id]
+    );
+
+    // Sync corresponding user record if exists
+    db.run(
+      `UPDATE users SET name = ?, email = ? WHERE ref_id = ? AND role = 'student';`,
+      [name.trim(), cleanEmail, id]
     );
     persistDb();
 
     const updated = executeQuery(db, `SELECT * FROM students WHERE id = ?;`, [id]).rows[0];
     res.json(updated);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Reset or Set Student Password (Admin or Self)
+app.post("/api/students/:id/reset-password", async (req: Request, res: Response) => {
+  try {
+    const db = await getDb();
+    const id = Number(req.params.id);
+    const { new_password } = req.body;
+
+    if (!new_password || !new_password.trim()) {
+      return res.status(400).json({ error: "New password is required." });
+    }
+
+    const studentCheck = executeQuery(db, `SELECT * FROM students WHERE id = ?;`, [id]);
+    if (studentCheck.rows.length === 0) {
+      return res.status(404).json({ error: "Student not found." });
+    }
+    const student = studentCheck.rows[0];
+
+    // Check if user record exists
+    const userCheck = executeQuery(db, `SELECT id, username FROM users WHERE ref_id = ? AND role = 'student';`, [id]);
+    let username = student.email.split('@')[0];
+
+    if (userCheck.rows.length === 0) {
+      // Create user record if not already present
+      db.run(
+        `INSERT INTO users (username, password, role, ref_id, name, email) VALUES (?, ?, 'student', ?, ?, ?);`,
+        [username, new_password.trim(), id, student.name, student.email]
+      );
+    } else {
+      username = userCheck.rows[0].username;
+      db.run(
+        `UPDATE users SET password = ? WHERE ref_id = ? AND role = 'student';`,
+        [new_password.trim(), id]
+      );
+    }
+    persistDb();
+
+    res.json({
+      success: true,
+      message: `Password updated successfully for student "${student.name}".`,
+      username,
+      updated_password: new_password.trim()
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get Student Login Credentials info
+app.get("/api/students/:id/credentials", async (req: Request, res: Response) => {
+  try {
+    const db = await getDb();
+    const id = Number(req.params.id);
+
+    const userRes = executeQuery(
+      db,
+      `SELECT id, username, password, role, email FROM users WHERE ref_id = ? AND role = 'student';`,
+      [id]
+    );
+
+    if (userRes.rows.length === 0) {
+      return res.json({ hasAccount: false });
+    }
+
+    const u = userRes.rows[0];
+    res.json({
+      hasAccount: true,
+      username: u.username,
+      password: u.password,
+      email: u.email
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -494,11 +659,12 @@ app.delete("/api/students/:id", async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Student not found" });
     }
 
-    // SQLite CASCADE handles enrollments and grades
+    // Delete student and corresponding user account
     db.run(`DELETE FROM students WHERE id = ?;`, [id]);
+    db.run(`DELETE FROM users WHERE ref_id = ? AND role = 'student';`, [id]);
     persistDb();
 
-    res.json({ success: true, message: `Student '${check.rows[0].name}' deleted successfully.` });
+    res.json({ success: true, message: `Student '${check.rows[0].name}' and their login account were deleted successfully.` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

@@ -14,7 +14,10 @@ import {
   Phone,
   Mail,
   Calendar,
-  BookOpen
+  BookOpen,
+  KeyRound,
+  Shield,
+  CheckCircle2,
 } from 'lucide-react';
 import { Student, StudentStatus } from '../types';
 import { exportToCsv } from '../utils/exportCsv';
@@ -47,9 +50,19 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     phone: '',
     enrollment_date: new Date().toISOString().split('T')[0],
     status: 'Active' as StudentStatus,
+    username: '',
+    password: 'student123',
   });
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Credentials & Password Management States
+  const [credentialsStudent, setCredentialsStudent] = useState<Student | null>(null);
+  const [studentCredentials, setStudentCredentials] = useState<{ username: string; password?: string; hasAccount: boolean } | null>(null);
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [credLoading, setCredLoading] = useState(false);
+  const [credSuccessMsg, setCredSuccessMsg] = useState<string | null>(null);
+  const [credError, setCredError] = useState<string | null>(null);
 
   // Filtered list
   const filteredStudents = students.filter((s) => {
@@ -68,6 +81,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       phone: '',
       enrollment_date: new Date().toISOString().split('T')[0],
       status: 'Active',
+      username: '',
+      password: 'student123',
     });
     setFormError(null);
     setIsAddModalOpen(true);
@@ -81,9 +96,60 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       phone: student.phone,
       enrollment_date: student.enrollment_date,
       status: student.status,
+      username: '',
+      password: '',
     });
     setFormError(null);
     setIsEditModalOpen(true);
+  };
+
+  const handleOpenCredentials = async (student: Student) => {
+    setCredentialsStudent(student);
+    setCredError(null);
+    setCredSuccessMsg(null);
+    setNewPasswordInput('student123');
+    setCredLoading(true);
+
+    try {
+      const res = await fetch(`/api/students/${student.id}/credentials`);
+      const data = await res.json();
+      setStudentCredentials(data);
+    } catch (err: any) {
+      setCredError('Failed to load credentials information.');
+    } finally {
+      setCredLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!credentialsStudent) return;
+    setCredLoading(true);
+    setCredError(null);
+    setCredSuccessMsg(null);
+
+    try {
+      const res = await fetch(`/api/students/${credentialsStudent.id}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ new_password: newPasswordInput }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to update password');
+      }
+
+      setCredSuccessMsg(data.message || 'Password successfully updated!');
+      setStudentCredentials({
+        hasAccount: true,
+        username: data.username,
+        password: data.updated_password,
+      });
+    } catch (err: any) {
+      setCredError(err.message || 'Failed to update password');
+    } finally {
+      setCredLoading(false);
+    }
   };
 
   const handleCreateStudent = async (e: React.FormEvent) => {
@@ -300,6 +366,13 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     </td>
                     <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
                       <button
+                        onClick={() => handleOpenCredentials(s)}
+                        title="Manage Login Credentials & Password"
+                        className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                      >
+                        <KeyRound className="w-3.5 h-3.5" />
+                      </button>
+                      <button
                         onClick={() => handleViewDetails(s.id)}
                         title="View Academic Transcript"
                         className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
@@ -416,6 +489,41 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                   <option value="Suspended">Suspended</option>
                 </select>
               </div>
+
+              {isAddModalOpen && (
+                <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-lg space-y-2">
+                  <div className="flex items-center space-x-1.5 text-indigo-900 font-bold">
+                    <KeyRound className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Portal Login Account</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">Username</label>
+                      <input
+                        type="text"
+                        value={formData.username}
+                        onChange={(e) => setFormData({ ...formData, username: e.target.value.toLowerCase().replace(/\s+/g, '') })}
+                        placeholder={formData.email ? formData.email.split('@')[0] : 'auto from email'}
+                        className="w-full p-2 border border-slate-200 bg-white rounded-lg focus:ring-1 focus:ring-indigo-500 text-slate-800"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">Initial Password *</label>
+                      <input
+                        type="text"
+                        required
+                        value={formData.password}
+                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                        placeholder="student123"
+                        className="w-full p-2 border border-slate-200 bg-white rounded-lg focus:ring-1 focus:ring-indigo-500 text-slate-800"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-indigo-700/80">
+                    The student will use this username and password to log in to their Student Portal.
+                  </p>
+                </div>
+              )}
 
               <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
                 <button
@@ -566,6 +674,121 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 Close Transcript
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Student Login Credentials & Password Reset Modal */}
+      {credentialsStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 flex items-center justify-center">
+                  <KeyRound className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900">Student Login Credentials</h2>
+                  <p className="text-xs text-slate-500">{credentialsStudent.name} (ID #{credentialsStudent.id})</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setCredentialsStudent(null)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {credError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700 flex items-start space-x-2">
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>{credError}</span>
+              </div>
+            )}
+
+            {credSuccessMsg && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700 flex items-start space-x-2">
+                <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-emerald-600" />
+                <span>{credSuccessMsg}</span>
+              </div>
+            )}
+
+            {/* Current Account Details */}
+            <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-2 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 font-medium">Username:</span>
+                <span className="font-mono font-bold text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">
+                  {studentCredentials?.username || credentialsStudent.email.split('@')[0]}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 font-medium">Student Email:</span>
+                <span className="font-mono text-slate-700">{credentialsStudent.email}</span>
+              </div>
+              {studentCredentials?.password && (
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 font-medium">Current Password:</span>
+                  <span className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                    {studentCredentials.password}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Set New Password Form */}
+            <form onSubmit={handleResetPassword} className="space-y-3 pt-1">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Set New Password</label>
+                <input
+                  type="text"
+                  required
+                  value={newPasswordInput}
+                  onChange={(e) => setNewPasswordInput(e.target.value)}
+                  placeholder="Enter new password"
+                  className="w-full p-2 text-xs border border-slate-300 rounded-lg focus:ring-1 focus:ring-indigo-500 text-slate-900 font-mono"
+                />
+              </div>
+
+              <div className="flex items-center space-x-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setNewPasswordInput('student123')}
+                  className="text-[11px] text-indigo-600 hover:text-indigo-800 font-medium cursor-pointer"
+                >
+                  ↺ Reset to default ("student123")
+                </button>
+                <span className="text-slate-300">•</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const randomPass = 'pass' + Math.floor(1000 + Math.random() * 9000);
+                    setNewPasswordInput(randomPass);
+                  }}
+                  className="text-[11px] text-slate-600 hover:text-slate-900 font-medium cursor-pointer"
+                >
+                  ⚡ Generate Random
+                </button>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setCredentialsStudent(null)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+                >
+                  Done
+                </button>
+                <button
+                  type="submit"
+                  disabled={credLoading}
+                  className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-2xs cursor-pointer disabled:opacity-50 flex items-center space-x-1"
+                >
+                  <KeyRound className="w-3 h-3" />
+                  <span>{credLoading ? 'Saving...' : 'Save Password'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
